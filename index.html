@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2026 旅遊計畫 - 穩定修復版</title>
+    <title>2026 旅遊計畫</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -17,12 +17,12 @@
         .time-wrapper { width: 145px; min-width: 145px; display: flex; align-items: center; gap: 8px; }
         .time-input { font-weight: 900; color: #2563EB; font-size: 1.1rem; }
         .nav-active { background: #1E293B; color: white; border-radius: 12px; font-weight: bold; padding: 8px 24px; }
-        .nav-inactive { color: #94A3B8; font-weight: bold; padding: 8px 24px; }
+        .nav-inactive { color: #94A3B8; font-weight: bold; padding: 8px 24px; cursor: pointer; }
         .shop-table th { font-size: 13px; color: #64748B; padding: 12px; text-align: left; border-bottom: 2px solid #E2E8F0; }
         .shop-table td { padding: 10px; border-bottom: 1px solid #F1F5F9; vertical-align: middle; }
         .map-btn { color: #3B82F6; cursor: pointer; transition: all 0.2s; }
         .map-btn:hover { color: #1D4ED8; transform: scale(1.2); }
-        .del-btn { color: #CBD5E1; cursor: pointer; }
+        .del-btn { color: #CBD5E1; cursor: pointer; transition: color 0.2s; }
         .del-btn:hover { color: #EF4444; }
     </style>
 </head>
@@ -30,10 +30,14 @@
 
     <div class="flex justify-between items-center mb-8">
         <h1 class="text-2xl font-black italic underline decoration-blue-500">2026 TRAVEL PLAN</h1>
-        <button onclick="addNewDay()" class="bg-blue-600 text-white px-6 py-2 rounded-full font-bold shadow-lg">+ 新增天數</button>
+        <div class="flex gap-2">
+            <button onclick="addNewDay()" class="bg-blue-600 text-white px-5 py-2 rounded-full font-bold shadow-lg hover:bg-blue-700 transition">+ 新增天數</button>
+            <button onclick="deleteCurrentDay()" class="bg-red-100 text-red-600 px-4 py-2 rounded-full font-bold hover:bg-red-200 transition">🗑️ 刪除這天</button>
+        </div>
     </div>
 
-    <div id="day-nav" class="flex gap-2 mb-8 overflow-x-auto pb-2"></div>
+    <div id="day-nav" class="flex gap-2 mb-8 overflow-x-auto pb-2 no-scrollbar"></div>
+
     <main id="main-content">讀取中...</main>
 
     <script>
@@ -47,6 +51,7 @@
         async function loadData() {
             const { data } = await _supabase.from('trips').select('*').order('id', { ascending: true });
             trips = data || [];
+            if (currentIdx >= trips.length) currentIdx = Math.max(0, trips.length - 1);
             render();
         }
 
@@ -54,31 +59,54 @@
             await _supabase.from('trips').update({ [field]: val }).eq('id', id);
         }
 
-        // 核心：保存列表並處理排序
         async function saveList(id, listName, listData, shouldSort = false) {
             if (shouldSort && listName === 'stops') {
                 listData.sort((a, b) => (a.time || "00:00").localeCompare(b.time || "00:00"));
             }
-            const { error } = await _supabase.from('trips').update({ [listName]: listData }).eq('id', id);
-            if(error) console.error("保存失敗:", error);
+            await _supabase.from('trips').update({ [listName]: listData }).eq('id', id);
             loadData();
         }
 
         function forceMap(val) {
             if(!val || val.trim() === "") return;
-            window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(val)}`, '_blank');
+            window.open(`https://www.google.com/maps/search/${encodeURIComponent(val)}`, '_blank');
         }
 
-        // 核心：新增景點在最後
+        // --- 天數操作 ---
+        async function addNewDay() {
+            const nextDayName = `Day ${trips.length + 1}`;
+            await _supabase.from('trips').insert([{ day: nextDayName, stops: [], shop_list: [] }]);
+            currentIdx = trips.length; // 跳到新的一天
+            loadData();
+        }
+
+        async function deleteCurrentDay() {
+            if (trips.length === 0) return;
+            const t = trips[currentIdx];
+            if (!confirm(`確定要刪除「${t.day}」的所有行程嗎？此動作無法復原！`)) return;
+            
+            await _supabase.from('trips').delete().eq('id', t.id);
+            currentIdx = 0; // 回到第一天
+            loadData();
+        }
+
+        // --- 景點操作 ---
         async function addStop(id) {
             let t = trips[currentIdx];
             let stops = Array.isArray(t.stops) ? [...t.stops] : [];
-            // 抓取最後一個景點的時間，往後推一點，或是預設晚上的時間
             let lastTime = stops.length > 0 ? stops[stops.length-1].time : "09:00";
             stops.push({ time: lastTime, place: "", note: "" });
-            await saveList(id, 'stops', stops, false); // 新增時不強制排序，讓它在最後
+            await saveList(id, 'stops', stops, false);
         }
 
+        async function deleteStop(id, index) {
+            if (!confirm('刪除此景點？')) return;
+            let stops = [...trips[currentIdx].stops];
+            stops.splice(index, 1);
+            await saveList(id, 'stops', stops, false);
+        }
+
+        // --- 購物操作 ---
         async function addShop(id) {
             let t = trips[currentIdx];
             let list = Array.isArray(t.shop_list) ? [...t.shop_list] : [];
@@ -86,37 +114,29 @@
             await saveList(id, 'shop_list', list);
         }
 
-        // 核心：修復刪除功能
-        async function deleteStop(id, index) {
-            if (!confirm('確定要刪除這個景點嗎？')) return;
-            let stops = [...trips[currentIdx].stops];
-            stops.splice(index, 1);
-            await saveList(id, 'stops', stops, false);
-        }
-
         async function deleteShop(id, index) {
-            if (!confirm('確定要刪除這項物品嗎？')) return;
+            if (!confirm('刪除此物品？')) return;
             let list = [...trips[currentIdx].shop_list];
             list.splice(index, 1);
             await saveList(id, 'shop_list', list);
         }
 
-        async function addNewDay() {
-            await _supabase.from('trips').insert([{ day: `Day ${trips.length + 1}`, stops: [], shop_list: [] }]);
-            loadData();
-        }
-
         function render() {
             const nav = document.getElementById('day-nav');
             const content = document.getElementById('main-content');
+            
             if (trips.length === 0) {
-                content.innerHTML = "尚未建立行程。";
+                nav.innerHTML = "";
+                content.innerHTML = `<div class="text-center py-20 bg-white rounded-3xl border-2 border-dashed border-slate-200">
+                    <p class="text-slate-400 mb-4">目前沒有行程</p>
+                    <button onclick="addNewDay()" class="bg-blue-600 text-white px-6 py-2 rounded-full font-bold">開始規劃第一天</button>
+                </div>`;
                 return;
             }
 
             nav.innerHTML = trips.map((t, i) => `
                 <button onclick="currentIdx=${i}; render();" class="${i === currentIdx ? 'nav-active' : 'nav-inactive'}">
-                    ${t.day || 'Day'}
+                    ${t.day || ('Day ' + (i+1))}
                 </button>
             `).join('');
 
@@ -135,14 +155,14 @@
                         <div class="info-box dest-box">
                             <span class="text-xs font-black text-blue-500 block mb-1">📍 目的地</span>
                             <div class="flex items-center gap-2">
-                                <input id="dest-${t.id}" class="text-xl font-bold" value="${t.dest || ''}" onblur="updateField(${t.id}, 'dest', this.value)" placeholder="去哪裡？">
+                                <input id="dest-${t.id}" class="text-xl font-bold" value="${t.dest || ''}" onblur="updateField(${t.id}, 'dest', this.value)" placeholder="城市/地點">
                                 <button onclick="forceMap(document.getElementById('dest-${t.id}').value)" class="map-btn"><i class="fas fa-location-arrow text-xl"></i></button>
                             </div>
                         </div>
                         <div class="info-box hotel-box">
                             <span class="text-xs font-black text-orange-500 block mb-1">🏨 住宿</span>
                             <div class="flex items-center gap-2">
-                                <input id="hotel-${t.id}" class="text-xl font-bold" value="${t.hotel || ''}" onblur="updateField(${t.id}, 'hotel', this.value)" placeholder="住哪裡？">
+                                <input id="hotel-${t.id}" class="text-xl font-bold" value="${t.hotel || ''}" onblur="updateField(${t.id}, 'hotel', this.value)" placeholder="飯店名稱">
                                 <button onclick="forceMap(document.getElementById('hotel-${t.id}').value)" class="map-btn" style="color:#F97316"><i class="fas fa-hotel text-xl"></i></button>
                             </div>
                         </div>
@@ -160,18 +180,18 @@
                                 <div class="flex items-center gap-4 mb-2">
                                     <div class="time-wrapper">
                                         <input type="time" class="time-input" value="${s.time || '09:00'}" 
-                                            onblur="stops[${i}].time=this.value; saveList(${t.id}, 'stops', stops, true)">
+                                            onblur="trips[${currentIdx}].stops[${i}].time=this.value; saveList(${t.id}, 'stops', trips[${currentIdx}].stops, true)">
                                         <i class="far fa-clock text-blue-300"></i>
                                     </div>
                                     <input id="stop-${i}" class="text-xl font-black flex-1" value="${s.place || ''}" 
-                                        onblur="stops[${i}].place=this.value; saveList(${t.id}, 'stops', stops, false)" placeholder="景點名稱">
+                                        onblur="trips[${currentIdx}].stops[${i}].place=this.value; saveList(${t.id}, 'stops', trips[${currentIdx}].stops, false)" placeholder="景點名稱">
                                     <div class="flex gap-4">
                                         <button onclick="forceMap(document.getElementById('stop-${i}').value)" class="map-btn text-blue-300"><i class="fas fa-map-marked-alt text-xl"></i></button>
                                         <button onclick="deleteStop(${t.id}, ${i})" class="del-btn"><i class="fas fa-trash-can text-lg"></i></button>
                                     </div>
                                 </div>
                                 <textarea rows="2" class="text-sm text-slate-400 bg-white p-3 rounded-xl border border-slate-100" 
-                                    onblur="stops[${i}].note=this.value; saveList(${t.id}, 'stops', stops, false)" placeholder="備註...">${s.note || ''}</textarea>
+                                    onblur="trips[${currentIdx}].stops[${i}].note=this.value; saveList(${t.id}, 'stops', trips[${currentIdx}].stops, false)" placeholder="行程備註...">${s.note || ''}</textarea>
                             </div>
                         `).join('')}
                     </div>
@@ -179,8 +199,8 @@
 
                 <div class="bg-white rounded-3xl p-6 shadow-sm overflow-x-auto">
                     <div class="flex justify-between items-center mb-6">
-                        <h3 class="text-sm font-black text-orange-500 italic uppercase">🛍️ Shopping 購物清單</h3>
-                        <button onclick="addShop(${t.id})" class="bg-orange-500 text-white px-4 py-1.5 rounded-full text-xs font-bold">+ 新增物品</button>
+                        <h3 class="text-sm font-black text-orange-500 italic uppercase">🛍️ Shopping 購物</h3>
+                        <button onclick="addShop(${t.id})" class="bg-orange-500 text-white px-4 py-1.5 rounded-full text-xs font-bold">+ 新增項目</button>
                     </div>
                     <table class="w-full shop-table min-w-[650px]">
                         <thead>
@@ -192,14 +212,14 @@
                                     <td>
                                         <div class="flex items-center gap-1 border-b border-slate-100">
                                             <input id="shop-loc-${i}" class="text-slate-400 text-sm" value="${item.store || ''}" 
-                                                onblur="shops[${i}].store=this.value; saveList(${t.id}, 'shop_list', shops)" placeholder="地點">
+                                                onblur="trips[${currentIdx}].shop_list[${i}].store=this.value; saveList(${t.id}, 'shop_list', trips[${currentIdx}].shop_list)" placeholder="地點">
                                             <button onclick="forceMap(document.getElementById('shop-loc-${i}').value)" class="map-btn text-xs text-blue-300"><i class="fas fa-map-marker-alt"></i></button>
                                         </div>
                                     </td>
-                                    <td><input class="font-bold border-b border-slate-100" value="${item.item || ''}" onblur="shops[${i}].item=this.value; saveList(${t.id}, 'shop_list', shops)"></td>
-                                    <td><input type="number" class="text-center font-bold" value="${item.qty || 1}" onblur="shops[${i}].qty=this.value; saveList(${t.id}, 'shop_list', shops)"></td>
-                                    <td><input type="number" class="text-blue-600 font-bold" value="${item.price || 0}" onblur="shops[${i}].price=this.value; saveList(${t.id}, 'shop_list', shops)"></td>
-                                    <td><input class="text-xs text-slate-400" value="${item.note || ''}" onblur="shops[${i}].note=this.value; saveList(${t.id}, 'shop_list', shops)"></td>
+                                    <td><input class="font-bold border-b border-slate-100" value="${item.item || ''}" onblur="trips[${currentIdx}].shop_list[${i}].item=this.value; saveList(${t.id}, 'shop_list', trips[${currentIdx}].shop_list)"></td>
+                                    <td><input type="number" class="text-center font-bold" value="${item.qty || 1}" onblur="trips[${currentIdx}].shop_list[${i}].qty=this.value; saveList(${t.id}, 'shop_list', trips[${currentIdx}].shop_list)"></td>
+                                    <td><input type="number" class="text-blue-600 font-bold" value="${item.price || 0}" onblur="trips[${currentIdx}].shop_list[${i}].price=this.value; saveList(${t.id}, 'shop_list', trips[currentIdx].shop_list)"></td>
+                                    <td><input class="text-xs text-slate-400" value="${item.note || ''}" onblur="trips[${currentIdx}].shop_list[${i}].note=this.value; saveList(${t.id}, 'shop_list', trips[${currentIdx}].shop_list)"></td>
                                     <td class="text-center">
                                         <button onclick="deleteShop(${t.id}, ${i})" class="del-btn text-xl"><i class="fas fa-circle-xmark"></i></button>
                                     </td>
