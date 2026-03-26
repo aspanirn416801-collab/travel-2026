@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2026 旅遊行程計畫 Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #FBFBFA; color: #37352F; }
+        .card-blue { border-left: 5px solid #58A6FF; background: #F0F7FF; border-radius: 12px; }
+        .card-orange { border-left: 5px solid #E9A23B; background: #FFF9F2; border-radius: 12px; }
+        .day-tab.active { background: #37352F; color: white; border-radius: 8px; }
+        [contenteditable]:focus { outline: none; background: #FFF9E6; border-radius: 4px; }
+        .nav-icon { color: #4285F4; cursor: pointer; transition: all 0.2s; }
+        .nav-icon:hover { transform: scale(1.2); }
+        .type-btn { font-size: 0.85rem; font-weight: 700; cursor: pointer; opacity: 0.3; transition: all 0.2s; padding: 4px 10px; border-radius: 20px; border: 1px solid #DDD; background: white; }
+        .type-btn.active { opacity: 1; background: #37352F; color: white; border-color: #37352F; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body class="max-w-2xl mx-auto min-h-screen bg-white shadow-xl pb-20">
+
+    <header class="p-8 flex justify-between items-center border-b border-gray-50">
+        <h1 class="text-2xl font-black">✈️ 2026 行程計畫</h1>
+        <button onclick="addNewDay()" class="bg-[#37352F] text-white px-5 py-2 rounded-full text-sm font-bold shadow-lg hover:scale-105 transition">+ 新增天數</button>
+    </header>
+
+    <div id="day-nav" class="flex gap-3 px-8 py-4 overflow-x-auto bg-[#F7F6F3] no-scrollbar sticky top-0 z-10 shadow-sm"></div>
+
+    <main id="main-content" class="p-8">
+        <div class="text-center py-20 text-gray-300 italic">載入行程中...</div>
+    </main>
+
+    <script>
+        const supabaseUrl = 'https://qmmtyfdidiecklhmpfbq.supabase.co';
+        const supabaseKey = 'sb_publishable_jVcE6vMZzu1L24w6hOZYcw_QY6FqY4Z';
+        const _supabase = supabase.createClient(supabaseUrl, supabaseKey);
+
+        let trips = [];
+        let currentIdx = 0;
+
+        async function loadData() {
+            const { data, error } = await _supabase.from('trips').select('*').order('id', { ascending: true });
+            if (!error) { trips = data; render(); }
+        }
+
+        async function save(id, field, val) {
+            await _supabase.from('trips').update({ [field]: val }).eq('id', id);
+        }
+
+        // 修改：時間排序與即時存檔
+        async function updateStop(id, stopIdx, field, val) {
+            let stops = [...trips[currentIdx].stops];
+            stops[stopIdx][field] = val;
+            if (field === 'time') stops.sort((a, b) => a.time.localeCompare(b.time));
+            await _supabase.from('trips').update({ stops }).eq('id', id);
+            loadData();
+        }
+
+        // 修改：新增在最後，且時間自動推算
+        async function addStop(id) {
+            let stops = trips[currentIdx].stops || [];
+            let newTime = "08:00";
+            
+            if (stops.length > 0) {
+                // 抓取最後一個點的時間，並增加 1 小時
+                let lastTime = stops[stops.length - 1].time;
+                let [hours, mins] = lastTime.split(':').map(Number);
+                let nextHour = (hours + 1) % 24;
+                newTime = `${nextHour.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+            }
+
+            stops.push({ time: newTime, place: "新景點", note: "", type: "🏛️ 景點" });
+            // 確保每次新增完依然按照時間排好
+            stops.sort((a, b) => a.time.localeCompare(b.time));
+            
+            await _supabase.from('trips').update({ stops }).eq('id', id);
+            loadData();
+        }
+
+        async function removeStop(id, stopIdx) {
+            let stops = trips[currentIdx].stops.filter((_, i) => i !== stopIdx);
+            await _supabase.from('trips').update({ stops }).eq('id', id);
+            loadData();
+        }
+
+        function singleNavigate(placeName) {
+            if (!placeName || placeName === "新景點" || placeName === "") return alert("請輸入正確地點");
+            window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName)}`, '_blank');
+        }
+
+        function render() {
+            const nav = document.getElementById('day-nav');
+            const container = document.getElementById('main-content');
+            nav.innerHTML = trips.map((t, i) => `
+                <button onclick="currentIdx=${i}; render();" class="day-tab px-5 py-2 text-sm font-bold whitespace-nowrap transition ${i === currentIdx ? 'active' : 'text-gray-400'}">Day ${i+1}</button>
+            `).join('');
+
+            const t = trips[currentIdx];
+            if (!t) return;
+
+            container.innerHTML = `
+                <div class="flex justify-between items-start mb-8">
+                    <div>
+                        <h2 class="text-3xl font-black mb-2 outline-none" contenteditable="true" onblur="save(${t.id}, 'day', this.innerText)">${t.day}</h2>
+                        <input type="date" value="${t.date}" onchange="save(${t.id}, 'date', this.value).then(loadData)">
+                    </div>
+                    <button onclick="deleteDay(${t.id})" class="text-gray-200 hover:text-red-400 p-2"><i class="fas fa-trash-alt text-lg"></i></button>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                    <div class="card-blue p-5 flex justify-between items-center shadow-sm">
+                        <div class="flex-1">
+                            <label class="text-[10px] font-black text-blue-500 uppercase block mb-1">📍 目的地</label>
+                            <div class="text-lg font-bold outline-none" contenteditable="true" onblur="save(${t.id}, 'dest', this.innerText)">${t.dest}</div>
+                        </div>
+                        <i class="fas fa-directions nav-icon text-xl" onclick="singleNavigate('${t.dest}')"></i>
+                    </div>
+                    <div class="card-orange p-5 flex justify-between items-center shadow-sm">
+                        <div class="flex-1">
+                            <label class="text-[10px] font-black text-orange-500 uppercase block mb-1">🏨 住宿</label>
+                            <div class="text-lg font-bold outline-none" contenteditable="true" onblur="save(${t.id}, 'hotel', this.innerText)">${t.hotel}</div>
+                        </div>
+                        <i class="fas fa-hotel nav-icon text-xl" onclick="singleNavigate('${t.hotel}')"></i>
+                    </div>
+                </div>
+
+                <div class="mb-10">
+                    <div class="flex justify-between items-center mb-6 border-b border-gray-100 pb-2">
+                        <h3 class="text-xs font-black text-gray-300 tracking-widest uppercase">Itinerary 行程清單</h3>
+                        <button onclick="addStop(${t.id})" class="text-blue-500 text-xs font-bold hover:underline">+ 新增景點</button>
+                    </div>
+                    <div class="space-y-12">
+                        ${(t.stops || []).map((stop, idx) => `
+                            <div class="group relative">
+                                <div class="flex gap-2 mb-3 items-center">
+                                    ${['🏛️ 景點', '🍴 餐廳', '🛍️ 購物'].map(label => `
+                                        <button class="type-btn ${stop.type === label ? 'active' : ''}" 
+                                              onclick="updateStop(${t.id}, ${idx}, 'type', '${label}')">${label}</button>
+                                    `).join('')}
+                                </div>
+                                
+                                <div class="flex items-center gap-4 mb-2">
+                                    <input type="time" value="${stop.time}" onchange="updateStop(${t.id}, ${idx}, 'time', this.value)" class="text-blue-600 font-bold bg-transparent outline-none text-lg">
+                                    <span class="flex-1 text-gray-800 font-bold text-xl outline-none" contenteditable="true" onblur="updateStop(${t.id}, ${idx}, 'place', this.innerText)">${stop.place}</span>
+                                    <i class="fas fa-map-marked-alt nav-icon text-lg opacity-30 group-hover:opacity-100" onclick="singleNavigate('${stop.place}')"></i>
+                                    <button onclick="removeStop(${t.id}, ${idx})" class="text-gray-200 hover:text-red-300 opacity-0 group-hover:opacity-100 transition"><i class="fas fa-times"></i></button>
+                                </div>
+                                
+                                <div class="ml-20 bg-gray-50 border border-gray-100 p-4 rounded-xl text-sm text-gray-600 outline-none hover:bg-[#FFF9E6] transition leading-relaxed min-h-[60px]" 
+                                     contenteditable="true" onblur="updateStop(${t.id}, ${idx}, 'note', this.innerText)">
+                                     ${stop.note || '在此輸入細節備註...'}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+
+                <div class="bg-[#F7F6F3] p-6 rounded-2xl border border-gray-100">
+                    <label class="text-[10px] font-black text-gray-400 uppercase block mb-2">備註與總結</label>
+                    <div class="text-sm text-gray-600 outline-none min-h-[100px]" contenteditable="true" onblur="save(${t.id}, 'itin', this.innerText)">${t.itin || '這天的天氣或是重要的航班資訊...'}</div>
+                </div>
+            `;
+        }
+
+        async function addNewDay() {
+            const lastTrip = trips[trips.length - 1];
+            const nextDate = lastTrip ? new Date(new Date(lastTrip.date).getTime() + 86400000).toISOString().split('T')[0] : '2026-04-01';
+            await _supabase.from('trips').insert([{ day: `Day ${trips.length + 1}`, date: nextDate, dest: '新城市', hotel: '', itin: '', stops: [{time: '08:00', place: '景點 A', note: '', type: '🏛️ 景點'}] }]);
+            loadData();
+        }
+
+        async function deleteDay(id) { if (confirm("確定刪除整天行程？")) { await _supabase.from('trips').delete().eq('id', id); currentIdx = 0; loadData(); } }
+
+        loadData();
+    </script>
+</body>
+</html>
