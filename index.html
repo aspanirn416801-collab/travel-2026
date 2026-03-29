@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2026 旅遊計畫 - 穩定復原版</title>
+    <title>2026 旅遊計畫</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -19,7 +19,8 @@
         .shop-table th { font-size: 13px; color: #64748B; padding: 12px; text-align: left; border-bottom: 2px solid #E2E8F0; }
         .shop-table td { padding: 10px; border-bottom: 1px solid #F1F5F9; vertical-align: middle; }
         .map-btn { color: #3B82F6; cursor: pointer; }
-        .del-btn { color: #CBD5E1; cursor: pointer; }
+        .del-btn { color: #CBD5E1; cursor: pointer; transition: 0.2s; }
+        .del-btn:hover { color: #EF4444; }
         .status-badge { padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: bold; }
         .mode-locked { background: #FEE2E2; color: #991B1B; }
         .mode-edit { background: #DCFCE7; color: #166534; }
@@ -27,20 +28,22 @@
 </head>
 <body class="max-w-4xl mx-auto py-8 px-4">
 
-    <div class="flex justify-between items-center mb-6">
-        <div id="auth-status" class="status-badge mode-locked"><i class="fas fa-lock mr-1"></i>唯讀模式</div>
-        <div id="auth-actions">
-            <button onclick="unlockPrompt()" class="bg-slate-800 text-white px-4 py-1 rounded-lg text-xs font-bold">解鎖編輯</button>
+    <div class="flex justify-between items-center mb-6 bg-white p-3 rounded-2xl shadow-sm border border-slate-100">
+        <div id="auth-status" class="status-badge mode-locked"><i class="fas fa-lock mr-2"></i>唯讀模式</div>
+        <div class="flex gap-2" id="auth-actions">
+            <button onclick="unlockPrompt()" class="bg-slate-800 text-white px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-700">解鎖編輯</button>
         </div>
     </div>
 
     <div class="flex justify-between items-center mb-8">
-        <h1 class="text-2xl font-black italic underline decoration-blue-500">2026 TRAVEL PLAN</h1>
-        <button onclick="checkAuth(() => addNewDay())" class="bg-blue-600 text-white px-6 py-2 rounded-full font-bold shadow-lg">+ 新增天數</button>
+        <h1 class="text-2xl font-black italic underline decoration-blue-500 tracking-tighter">2026 TRAVEL PLAN</h1>
+        <div class="flex gap-3">
+            <button onclick="checkAuth(() => addNewDay())" class="bg-blue-600 text-white px-6 py-2 rounded-full font-bold shadow-lg hover:bg-blue-700">+ 新增天數</button>
+            <div id="extra-actions"></div> </div>
     </div>
 
-    <div id="day-nav" class="flex gap-2 mb-8 overflow-x-auto pb-2"></div>
-    <main id="main-content">讀取中...</main>
+    <div id="day-nav" class="flex gap-2 mb-8 overflow-x-auto pb-2 no-scrollbar"></div>
+    <main id="main-content">資料加載中...</main>
 
     <script>
         const supabaseUrl = 'https://qmmtyfdidiecklhmpfbq.supabase.co';
@@ -53,24 +56,28 @@
         let currentIdx = 0;
 
         function unlockPrompt() {
-            const pwd = prompt("輸入密碼：");
+            const pwd = prompt("請輸入送審核准密碼：");
             if (pwd === ADMIN_PWD) {
                 isEditMode = true;
-                document.getElementById('auth-status').innerHTML = '<i class="fas fa-unlock mr-1"></i>編輯模式';
+                document.getElementById('auth-status').innerHTML = '<i class="fas fa-unlock mr-2"></i>編輯模式 (已核准)';
                 document.getElementById('auth-status').className = 'status-badge mode-edit';
-                document.getElementById('auth-actions').innerHTML = `<button onclick="location.reload()" class="bg-red-500 text-white px-4 py-1 rounded-lg text-xs font-bold">退出並鎖定</button>`;
+                document.getElementById('auth-actions').innerHTML = `<button onclick="location.reload()" class="bg-red-500 text-white px-4 py-1.5 rounded-lg text-xs font-bold">退出鎖定</button>`;
+                document.getElementById('extra-actions').innerHTML = `<button onclick="deleteCurrentDay()" class="bg-red-100 text-red-600 px-4 py-2 rounded-full font-bold hover:bg-red-200">🗑️ 刪除這天</button>`;
                 render();
+            } else if (pwd !== null) {
+                alert("密碼錯誤！");
             }
         }
 
         function checkAuth(callback) {
             if (isEditMode) callback();
-            else alert("請先解鎖編輯權限");
+            else alert("⚠️ 請先點擊上方「解鎖編輯」");
         }
 
         async function loadData() {
             const { data } = await _supabase.from('trips').select('*').order('id', { ascending: true });
             trips = data || [];
+            if (currentIdx >= trips.length) currentIdx = Math.max(0, trips.length - 1);
             render();
         }
 
@@ -93,16 +100,28 @@
             window.open(`https://www.google.com/maps/search/${encodeURIComponent(val)}`, '_blank');
         }
 
+        // --- 天數功能 ---
         async function addNewDay() {
             await _supabase.from('trips').insert([{ day: `Day ${trips.length + 1}`, stops: [], shop_list: [] }]);
-            currentIdx = trips.length;
+            currentIdx = trips.length; 
+            loadData();
+        }
+
+        async function deleteCurrentDay() {
+            if (trips.length === 0) return;
+            if (!confirm(`確定要刪除整個「${trips[currentIdx].day}」的行程嗎？`)) return;
+            await _supabase.from('trips').delete().eq('id', trips[currentIdx].id);
+            currentIdx = 0;
             loadData();
         }
 
         function render() {
             const nav = document.getElementById('day-nav');
             const content = document.getElementById('main-content');
-            if (trips.length === 0) return;
+            if (trips.length === 0) {
+                content.innerHTML = `<div class="text-center py-10 text-slate-400">尚無行程，請點擊新增。</div>`;
+                return;
+            }
 
             nav.innerHTML = trips.map((t, i) => `
                 <button onclick="currentIdx=${i}; render();" class="${i === currentIdx ? 'nav-active' : 'nav-inactive'}">
@@ -140,41 +159,45 @@
 
                 <div class="mb-10 bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
                     <div class="flex justify-between items-center mb-6 border-b pb-2">
-                        <h3 class="text-sm font-black text-slate-300 italic uppercase">Itinerary 行程</h3>
+                        <h3 class="text-sm font-black text-slate-300 italic">ITINERARY 行程</h3>
                         ${isEditMode ? `<button onclick="addStop(${t.id})" class="text-blue-600 font-bold text-xs">+ 新增景點</button>` : ''}
                     </div>
                     <div class="space-y-6">
                         ${stops.map((s, i) => `
                             <div class="relative pl-6 border-l-4 border-blue-50">
                                 <div class="flex items-center gap-4 mb-2">
-                                    <input type="time" class="w-32 font-black text-blue-600 text-lg" value="${s.time || '09:00'}" onblur="stops[${i}].time=this.value; saveList(${t.id}, 'stops', stops, true)" ${!isEditMode ? 'readonly' : ''}>
-                                    <input id="stop-${i}" class="text-xl font-black flex-1" value="${s.place || ''}" onblur="stops[${i}].place=this.value; saveList(${t.id}, 'stops', stops, false)" placeholder="景點名稱" ${!isEditMode ? 'readonly' : ''}>
+                                    <input type="time" class="w-32 font-black text-blue-600 text-lg" value="${s.time || '09:00'}" 
+                                        onblur="stops[${i}].time=this.value; saveList(${t.id}, 'stops', stops, true)" ${!isEditMode ? 'readonly' : ''}>
+                                    <input id="stop-${i}" class="text-xl font-black flex-1" value="${s.place || ''}" 
+                                        onblur="stops[${i}].place=this.value; saveList(${t.id}, 'stops', stops, false)" placeholder="點名稱" ${!isEditMode ? 'readonly' : ''}>
                                     <i onclick="forceMap(document.getElementById('stop-${i}').value)" class="fas fa-map-marked-alt map-btn text-blue-300"></i>
                                     ${isEditMode ? `<i onclick="deleteStop(${t.id}, ${i})" class="fas fa-trash-can del-btn"></i>` : ''}
                                 </div>
-                                <textarea rows="2" class="text-sm text-slate-400" onblur="stops[${i}].note=this.value; saveList(${t.id}, 'stops', stops, false)" placeholder="行程備註..." ${!isEditMode ? 'readonly' : ''}>${s.note || ''}</textarea>
+                                <textarea rows="2" class="text-sm text-slate-400" onblur="stops[${i}].note=this.value; saveList(${t.id}, 'stops', stops, false)" 
+                                    placeholder="備註..." ${!isEditMode ? 'readonly' : ''}>${s.note || ''}</textarea>
                             </div>
                         `).join('')}
                     </div>
                 </div>
 
                 <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
-                    <div class="flex justify-between items-center mb-6">
-                        <h3 class="text-sm font-black text-orange-500 italic uppercase">🛍️ Shopping 購物清單</h3>
+                    <div class="flex justify-between items-center mb-6 border-b pb-2">
+                        <h3 class="text-sm font-black text-orange-500 italic">🛍️ SHOPPING 購物清單</h3>
                         ${isEditMode ? `<button onclick="addShop(${t.id})" class="bg-orange-500 text-white px-4 py-1.5 rounded-full text-xs font-bold">+ 新增物品</button>` : ''}
                     </div>
                     <div class="overflow-x-auto">
-                        <table class="w-full shop-table min-w-[700px]">
+                        <table class="w-full shop-table min-w-[750px]">
                             <thead>
-                                <tr><th width="160">地區</th><th>購買物品</th><th width="60">量</th><th width="100">價格</th><th>備註</th><th width="50"></th></tr>
+                                <tr><th width="150">地區</th><th>購買物品</th><th width="60">量</th><th width="120">價格</th><th>備註</th><th width="50"></th></tr>
                             </thead>
                             <tbody>
                                 ${shops.map((item, i) => `
                                     <tr>
                                         <td>
-                                            <div class="flex items-center gap-1 border-b border-slate-50">
-                                                <input id="shop-loc-${i}" class="text-slate-400 text-sm" value="${item.store || ''}" onblur="shops[${i}].store=this.value; saveList(${t.id}, 'shop_list', shops)" placeholder="地區" ${!isEditMode ? 'readonly' : ''}>
-                                                <i onclick="forceMap(document.getElementById('shop-loc-${i}').value)" class="fas fa-map-marker-alt map-btn text-[10px] opacity-40"></i>
+                                            <div class="flex items-center gap-2 border-b border-slate-50">
+                                                <input id="shop-loc-${i}" class="text-slate-400 text-sm" value="${item.store || ''}" 
+                                                    onblur="shops[${i}].store=this.value; saveList(${t.id}, 'shop_list', shops)" placeholder="地區" ${!isEditMode ? 'readonly' : ''}>
+                                                <i onclick="forceMap(document.getElementById('shop-loc-${i}').value)" class="fas fa-map-marker-alt map-btn text-xs opacity-50"></i>
                                             </div>
                                         </td>
                                         <td><input class="font-bold border-b border-slate-50" value="${item.item || ''}" onblur="shops[${i}].item=this.value; saveList(${t.id}, 'shop_list', shops)" ${!isEditMode ? 'readonly' : ''}></td>
@@ -191,6 +214,7 @@
             `;
         }
 
+        // --- 子項目功能 ---
         async function addStop(id) {
             let t = trips[currentIdx];
             let stops = [...t.stops];
@@ -199,7 +223,7 @@
         }
 
         async function deleteStop(id, index) {
-            if(!confirm("刪除？")) return;
+            if(!confirm("刪除此行程？")) return;
             let stops = [...trips[currentIdx].stops];
             stops.splice(index, 1);
             await saveList(id, 'stops', stops, false);
@@ -213,7 +237,7 @@
         }
 
         async function deleteShop(id, index) {
-            if(!confirm("刪除？")) return;
+            if(!confirm("刪除此物品？")) return;
             let list = [...trips[currentIdx].shop_list];
             list.splice(index, 1);
             await saveList(id, 'shop_list', list);
