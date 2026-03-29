@@ -14,6 +14,8 @@
         .dest-box { border-color: #BFDBFE; background: #EFF6FF; }
         .hotel-box { border-color: #FED7AA; background: #FFF7ED; }
         input, textarea { background: transparent; border: none; outline: none; width: 100%; }
+        /* 唯讀狀態下的視覺提示 */
+        input[readonly], textarea[readonly] { cursor: default; color: #64748B; }
         .nav-active { background: #1E293B; color: white; border-radius: 12px; font-weight: bold; padding: 8px 24px; }
         .nav-inactive { color: #94A3B8; font-weight: bold; padding: 8px 24px; cursor: pointer; }
         .shop-table th { font-size: 13px; color: #64748B; padding: 12px; text-align: left; border-bottom: 2px solid #E2E8F0; }
@@ -29,21 +31,19 @@
 <body class="max-w-4xl mx-auto py-8 px-4">
 
     <div class="flex justify-between items-center mb-6 bg-white p-3 rounded-2xl shadow-sm border border-slate-100">
-        <div id="auth-status" class="status-badge mode-locked"><i class="fas fa-lock mr-2"></i>唯讀模式</div>
+        <div id="auth-status" class="status-badge mode-locked"><i class="fas fa-lock mr-2"></i>唯讀模式 (Read Only)</div>
         <div class="flex gap-2" id="auth-actions">
-            <button onclick="unlockPrompt()" class="bg-slate-800 text-white px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-700">解鎖編輯</button>
-        </div>
+            </div>
     </div>
 
     <div class="flex justify-between items-center mb-8">
         <h1 class="text-2xl font-black italic underline decoration-blue-500 tracking-tighter">2026 TRAVEL PLAN</h1>
-        <div class="flex gap-3">
-            <button onclick="checkAuth(() => addNewDay())" class="bg-blue-600 text-white px-6 py-2 rounded-full font-bold shadow-lg hover:bg-blue-700">+ 新增天數</button>
-            <div id="extra-actions"></div> </div>
+        <div class="flex gap-3" id="main-actions">
+            </div>
     </div>
 
     <div id="day-nav" class="flex gap-2 mb-8 overflow-x-auto pb-2 no-scrollbar"></div>
-    <main id="main-content">資料加載中...</main>
+    <main id="main-content">讀取中...</main>
 
     <script>
         const supabaseUrl = 'https://qmmtyfdidiecklhmpfbq.supabase.co';
@@ -55,29 +55,49 @@
         let trips = [];
         let currentIdx = 0;
 
+        // 初始化權限按鈕
+        function updateAuthUI() {
+            const authActions = document.getElementById('auth-actions');
+            const mainActions = document.getElementById('main-actions');
+            const statusBadge = document.getElementById('auth-status');
+
+            if (isEditMode) {
+                statusBadge.innerHTML = '<i class="fas fa-unlock mr-2"></i>編輯模式 (已核准)';
+                statusBadge.className = 'status-badge mode-edit';
+                authActions.innerHTML = `<button onclick="lockMode()" class="bg-red-500 text-white px-4 py-1.5 rounded-lg text-xs font-bold">退出鎖定</button>`;
+                mainActions.innerHTML = `
+                    <button onclick="addNewDay()" class="bg-blue-600 text-white px-6 py-2 rounded-full font-bold shadow-lg">+ 新增天數</button>
+                    <button onclick="deleteCurrentDay()" class="bg-red-100 text-red-600 px-4 py-2 rounded-full font-bold hover:bg-red-200">🗑️ 刪除這天</button>
+                `;
+            } else {
+                statusBadge.innerHTML = '<i class="fas fa-lock mr-2"></i>唯讀模式 (Read Only)';
+                statusBadge.className = 'status-badge mode-locked';
+                authActions.innerHTML = `<button onclick="unlockPrompt()" class="bg-slate-800 text-white px-4 py-1.5 rounded-lg text-xs font-bold">解鎖編輯</button>`;
+                mainActions.innerHTML = `<span class="text-slate-300 text-sm self-center">請解鎖以進行編輯</span>`;
+            }
+        }
+
         function unlockPrompt() {
-            const pwd = prompt("請輸入送審核准密碼：");
+            const pwd = prompt("請輸入編輯權限密碼：");
             if (pwd === ADMIN_PWD) {
                 isEditMode = true;
-                document.getElementById('auth-status').innerHTML = '<i class="fas fa-unlock mr-2"></i>編輯模式 (已核准)';
-                document.getElementById('auth-status').className = 'status-badge mode-edit';
-                document.getElementById('auth-actions').innerHTML = `<button onclick="location.reload()" class="bg-red-500 text-white px-4 py-1.5 rounded-lg text-xs font-bold">退出鎖定</button>`;
-                document.getElementById('extra-actions').innerHTML = `<button onclick="deleteCurrentDay()" class="bg-red-100 text-red-600 px-4 py-2 rounded-full font-bold hover:bg-red-200">🗑️ 刪除這天</button>`;
-                render();
+                updateAuthUI();
+                render(); // 重要：解鎖後立即重繪，移除 readonly
             } else if (pwd !== null) {
                 alert("密碼錯誤！");
             }
         }
 
-        function checkAuth(callback) {
-            if (isEditMode) callback();
-            else alert("⚠️ 請先點擊上方「解鎖編輯」");
+        function lockMode() {
+            isEditMode = false;
+            updateAuthUI();
+            render();
         }
 
         async function loadData() {
             const { data } = await _supabase.from('trips').select('*').order('id', { ascending: true });
             trips = data || [];
-            if (currentIdx >= trips.length) currentIdx = Math.max(0, trips.length - 1);
+            updateAuthUI();
             render();
         }
 
@@ -97,19 +117,18 @@
 
         function forceMap(val) {
             if(!val || val.trim() === "") return;
-            window.open(`https://www.google.com/maps/search/${encodeURIComponent(val)}`, '_blank');
+            window.open(`http://googleusercontent.com/maps.google.com/search?q=${encodeURIComponent(val)}`, '_blank');
         }
 
-        // --- 天數功能 ---
         async function addNewDay() {
             await _supabase.from('trips').insert([{ day: `Day ${trips.length + 1}`, stops: [], shop_list: [] }]);
-            currentIdx = trips.length; 
+            currentIdx = trips.length;
             loadData();
         }
 
         async function deleteCurrentDay() {
             if (trips.length === 0) return;
-            if (!confirm(`確定要刪除整個「${trips[currentIdx].day}」的行程嗎？`)) return;
+            if (!confirm(`確定要刪除「${trips[currentIdx].day}」的所有行程嗎？`)) return;
             await _supabase.from('trips').delete().eq('id', trips[currentIdx].id);
             currentIdx = 0;
             loadData();
@@ -119,7 +138,7 @@
             const nav = document.getElementById('day-nav');
             const content = document.getElementById('main-content');
             if (trips.length === 0) {
-                content.innerHTML = `<div class="text-center py-10 text-slate-400">尚無行程，請點擊新增。</div>`;
+                content.innerHTML = `<div class="text-center py-20 text-slate-400">尚無資料，請先解鎖並新增天數。</div>`;
                 return;
             }
 
@@ -143,14 +162,14 @@
                         <div class="info-box dest-box">
                             <span class="text-xs font-black text-blue-500 block mb-1">📍 目的地</span>
                             <div class="flex items-center gap-2">
-                                <input id="dest-${t.id}" class="text-xl font-bold" value="${t.dest || ''}" onblur="updateField(${t.id}, 'dest', this.value)" placeholder="輸入地點" ${!isEditMode ? 'readonly' : ''}>
+                                <input id="dest-${t.id}" class="text-xl font-bold" value="${t.dest || ''}" onblur="updateField(${t.id}, 'dest', this.value)" placeholder="目的地" ${!isEditMode ? 'readonly' : ''}>
                                 <i onclick="forceMap(document.getElementById('dest-${t.id}').value)" class="fas fa-location-arrow map-btn"></i>
                             </div>
                         </div>
                         <div class="info-box hotel-box">
                             <span class="text-xs font-black text-orange-500 block mb-1">🏨 住宿飯店</span>
                             <div class="flex items-center gap-2">
-                                <input id="hotel-${t.id}" class="text-xl font-bold" value="${t.hotel || ''}" onblur="updateField(${t.id}, 'hotel', this.value)" placeholder="飯店名稱" ${!isEditMode ? 'readonly' : ''}>
+                                <input id="hotel-${t.id}" class="text-xl font-bold" value="${t.hotel || ''}" onblur="updateField(${t.id}, 'hotel', this.value)" placeholder="飯店" ${!isEditMode ? 'readonly' : ''}>
                                 <i onclick="forceMap(document.getElementById('hotel-${t.id}').value)" class="fas fa-hotel map-btn text-orange-400"></i>
                             </div>
                         </div>
@@ -159,22 +178,19 @@
 
                 <div class="mb-10 bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
                     <div class="flex justify-between items-center mb-6 border-b pb-2">
-                        <h3 class="text-sm font-black text-slate-300 italic">ITINERARY 行程</h3>
+                        <h3 class="text-sm font-black text-slate-300 italic uppercase">Itinerary 行程</h3>
                         ${isEditMode ? `<button onclick="addStop(${t.id})" class="text-blue-600 font-bold text-xs">+ 新增景點</button>` : ''}
                     </div>
                     <div class="space-y-6">
                         ${stops.map((s, i) => `
                             <div class="relative pl-6 border-l-4 border-blue-50">
                                 <div class="flex items-center gap-4 mb-2">
-                                    <input type="time" class="w-32 font-black text-blue-600 text-lg" value="${s.time || '09:00'}" 
-                                        onblur="stops[${i}].time=this.value; saveList(${t.id}, 'stops', stops, true)" ${!isEditMode ? 'readonly' : ''}>
-                                    <input id="stop-${i}" class="text-xl font-black flex-1" value="${s.place || ''}" 
-                                        onblur="stops[${i}].place=this.value; saveList(${t.id}, 'stops', stops, false)" placeholder="點名稱" ${!isEditMode ? 'readonly' : ''}>
+                                    <input type="time" class="w-32 font-black text-blue-600 text-lg" value="${s.time || '09:00'}" onblur="stops[${i}].time=this.value; saveList(${t.id}, 'stops', stops, true)" ${!isEditMode ? 'readonly' : ''}>
+                                    <input id="stop-${i}" class="text-xl font-black flex-1" value="${s.place || ''}" onblur="stops[${i}].place=this.value; saveList(${t.id}, 'stops', stops, false)" placeholder="景點名稱" ${!isEditMode ? 'readonly' : ''}>
                                     <i onclick="forceMap(document.getElementById('stop-${i}').value)" class="fas fa-map-marked-alt map-btn text-blue-300"></i>
                                     ${isEditMode ? `<i onclick="deleteStop(${t.id}, ${i})" class="fas fa-trash-can del-btn"></i>` : ''}
                                 </div>
-                                <textarea rows="2" class="text-sm text-slate-400" onblur="stops[${i}].note=this.value; saveList(${t.id}, 'stops', stops, false)" 
-                                    placeholder="備註..." ${!isEditMode ? 'readonly' : ''}>${s.note || ''}</textarea>
+                                <textarea rows="2" class="text-sm text-slate-400" onblur="stops[${i}].note=this.value; saveList(${t.id}, 'stops', stops, false)" placeholder="備註..." ${!isEditMode ? 'readonly' : ''}>${s.note || ''}</textarea>
                             </div>
                         `).join('')}
                     </div>
@@ -182,21 +198,20 @@
 
                 <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
                     <div class="flex justify-between items-center mb-6 border-b pb-2">
-                        <h3 class="text-sm font-black text-orange-500 italic">🛍️ SHOPPING 購物清單</h3>
+                        <h3 class="text-sm font-black text-orange-500 italic uppercase">🛍️ Shopping 購物清單</h3>
                         ${isEditMode ? `<button onclick="addShop(${t.id})" class="bg-orange-500 text-white px-4 py-1.5 rounded-full text-xs font-bold">+ 新增物品</button>` : ''}
                     </div>
                     <div class="overflow-x-auto">
                         <table class="w-full shop-table min-w-[750px]">
                             <thead>
-                                <tr><th width="150">地區</th><th>購買物品</th><th width="60">量</th><th width="120">價格</th><th>備註</th><th width="50"></th></tr>
+                                <tr><th width="150">地區</th><th>購買物品</th><th width="60">量</th><th width="120">價格</th><th>備註</th><th width="40"></th></tr>
                             </thead>
                             <tbody>
                                 ${shops.map((item, i) => `
                                     <tr>
                                         <td>
-                                            <div class="flex items-center gap-2 border-b border-slate-50">
-                                                <input id="shop-loc-${i}" class="text-slate-400 text-sm" value="${item.store || ''}" 
-                                                    onblur="shops[${i}].store=this.value; saveList(${t.id}, 'shop_list', shops)" placeholder="地區" ${!isEditMode ? 'readonly' : ''}>
+                                            <div class="flex items-center gap-2">
+                                                <input id="shop-loc-${i}" class="text-slate-400 text-sm border-b border-slate-50" value="${item.store || ''}" onblur="shops[${i}].store=this.value; saveList(${t.id}, 'shop_list', shops)" placeholder="地區" ${!isEditMode ? 'readonly' : ''}>
                                                 <i onclick="forceMap(document.getElementById('shop-loc-${i}').value)" class="fas fa-map-marker-alt map-btn text-xs opacity-50"></i>
                                             </div>
                                         </td>
@@ -214,7 +229,6 @@
             `;
         }
 
-        // --- 子項目功能 ---
         async function addStop(id) {
             let t = trips[currentIdx];
             let stops = [...t.stops];
@@ -224,7 +238,8 @@
 
         async function deleteStop(id, index) {
             if(!confirm("刪除此行程？")) return;
-            let stops = [...trips[currentIdx].stops];
+            let t = trips[currentIdx];
+            let stops = [...t.stops];
             stops.splice(index, 1);
             await saveList(id, 'stops', stops, false);
         }
