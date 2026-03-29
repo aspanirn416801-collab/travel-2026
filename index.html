@@ -15,24 +15,22 @@
         .hotel-box { border-color: #FED7AA; background: #FFF7ED; }
         input, textarea { background: transparent; border: none; outline: none; width: 100%; font-size: inherit; color: inherit; }
         
-        /* 權限遮罩邏輯 */
-        #edit-layer { position: relative; }
-        #lock-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 50; cursor: not-allowed; display: block; }
-        .is-editing #lock-overlay { display: none; }
+        /* 唯讀時的視覺提示：讓輸入框看起來不像可以打字，但保留功能 */
+        input[readonly], textarea[readonly] { cursor: default; }
 
         .nav-active { background: #1E293B; color: white; border-radius: 12px; font-weight: bold; padding: 8px 24px; }
         .nav-inactive { color: #94A3B8; font-weight: bold; padding: 8px 24px; cursor: pointer; }
         .shop-table th { font-size: 13px; color: #64748B; padding: 12px; text-align: left; border-bottom: 2px solid #E2E8F0; }
         .shop-table td { padding: 10px; border-bottom: 1px solid #F1F5F9; }
-        .map-btn { color: #3B82F6; cursor: pointer; padding: 4px; }
-        .map-btn:hover { color: #1D4ED8; }
+        .map-btn { color: #3B82F6; cursor: pointer; padding: 4px; transition: 0.2s; position: relative; z-index: 100; }
+        .map-btn:hover { color: #1D4ED8; transform: scale(1.1); }
         .status-bar { border-radius: 12px; padding: 8px 16px; font-weight: bold; font-size: 14px; }
     </style>
 </head>
 <body class="max-w-4xl mx-auto py-8 px-4">
 
     <div class="flex justify-between items-center mb-6 bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
-        <div id="status-tag" class="status-bar bg-red-100 text-red-700"><i class="fas fa-lock mr-2"></i>唯讀模式 (Read Only)</div>
+        <div id="status-tag" class="status-bar bg-red-100 text-red-700"><i class="fas fa-lock mr-2"></i>唯讀模式 (搜尋功能開啟)</div>
         <div class="flex gap-2">
             <button id="lock-btn" onclick="handleLock()" class="bg-slate-800 text-white px-5 py-2 rounded-lg font-bold">解鎖編輯</button>
             <button id="del-day-btn" onclick="deleteCurrentDay()" class="hidden bg-red-500 text-white px-5 py-2 rounded-lg font-bold">🗑️ 刪除這天</button>
@@ -46,9 +44,7 @@
 
     <div id="day-nav" class="flex gap-2 mb-8 overflow-x-auto pb-2"></div>
 
-    <div id="edit-layer">
-        <div id="lock-overlay"></div> <main id="main-content">讀取中...</main>
-    </div>
+    <main id="main-content">讀取中...</main>
 
     <script>
         const supabaseUrl = 'https://qmmtyfdidiecklhmpfbq.supabase.co';
@@ -65,15 +61,15 @@
                 const pwd = prompt("請輸入送審編輯密碼：");
                 if (pwd === ADMIN_PWD) {
                     isEditMode = true;
-                    document.body.classList.add('is-editing');
                     document.getElementById('status-tag').className = 'status-bar bg-green-100 text-green-700';
-                    document.getElementById('status-tag').innerHTML = '<i class="fas fa-unlock mr-2"></i>編輯模式 (可直接修改)';
+                    document.getElementById('status-tag').innerHTML = '<i class="fas fa-unlock mr-2"></i>編輯模式 (已核准)';
                     document.getElementById('lock-btn').innerText = '儲存並鎖定';
                     document.getElementById('add-day-btn').classList.remove('hidden');
                     document.getElementById('del-day-btn').classList.remove('hidden');
+                    render(); // 重新渲染以移除 readonly
                 } else if (pwd !== null) alert("密碼錯誤");
             } else {
-                location.reload(); // 鎖定時直接刷新確保安全
+                location.reload(); 
             }
         }
 
@@ -83,10 +79,12 @@
             render();
         }
 
+        // 修正地圖搜尋函數
         function openMap(id) {
             const val = document.getElementById(id).value;
             if(!val) return alert("請先輸入地點名稱");
-            window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(val)}`, '_blank');
+            const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(val)}`;
+            window.open(url, '_blank');
         }
 
         async function updateField(id, field, val) {
@@ -130,25 +128,26 @@
             const t = trips[currentIdx];
             const stops = Array.isArray(t.stops) ? t.stops : [];
             const shops = Array.isArray(t.shop_list) ? t.shop_list : [];
+            const readAttr = isEditMode ? '' : 'readonly';
 
             content.innerHTML = `
                 <div class="mb-8">
                     <div class="flex justify-between items-end mb-4">
-                        <input class="text-4xl font-black w-1/2" value="${t.day || ''}" onblur="updateField(${t.id}, 'day', this.value)">
-                        <input type="date" value="${t.date || ''}" onchange="updateField(${t.id}, 'date', this.value)" class="font-bold text-slate-400">
+                        <input class="text-4xl font-black w-1/2" value="${t.day || ''}" onblur="updateField(${t.id}, 'day', this.value)" ${readAttr}>
+                        <input type="date" value="${t.date || ''}" onchange="updateField(${t.id}, 'date', this.value)" class="font-bold text-slate-400" ${isEditMode ? '' : 'disabled'}>
                     </div>
                     <div class="flex flex-col md:flex-row gap-4">
                         <div class="info-box dest-box">
                             <span class="text-xs font-black text-blue-500 block mb-1">📍 目的地</span>
                             <div class="flex items-center gap-2">
-                                <input id="dest-input" class="text-xl font-bold" value="${t.dest || ''}" onblur="updateField(${t.id}, 'dest', this.value)">
+                                <input id="dest-input" class="text-xl font-bold" value="${t.dest || ''}" onblur="updateField(${t.id}, 'dest', this.value)" ${readAttr}>
                                 <i onclick="openMap('dest-input')" class="fas fa-search-location map-btn text-xl"></i>
                             </div>
                         </div>
                         <div class="info-box hotel-box">
                             <span class="text-xs font-black text-orange-500 block mb-1">🏨 飯店</span>
                             <div class="flex items-center gap-2">
-                                <input id="hotel-input" class="text-xl font-bold" value="${t.hotel || ''}" onblur="updateField(${t.id}, 'hotel', this.value)">
+                                <input id="hotel-input" class="text-xl font-bold" value="${t.hotel || ''}" onblur="updateField(${t.id}, 'hotel', this.value)" ${readAttr}>
                                 <i onclick="openMap('hotel-input')" class="fas fa-hotel map-btn text-xl text-orange-400"></i>
                             </div>
                         </div>
@@ -158,18 +157,18 @@
                 <div class="mb-10 bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
                     <div class="flex justify-between items-center mb-6 border-b pb-2">
                         <h3 class="text-sm font-black text-slate-300 italic uppercase">Itinerary 行程</h3>
-                        <button onclick="addStop(${t.id})" class="text-blue-600 font-bold">+ 新增景點</button>
+                        ${isEditMode ? `<button onclick="addStop(${t.id})" class="text-blue-600 font-bold">+ 新增景點</button>` : ''}
                     </div>
                     <div class="space-y-6">
                         ${stops.map((s, i) => `
                             <div class="relative pl-6 border-l-4 border-blue-50">
                                 <div class="flex items-center gap-4 mb-2">
-                                    <input type="time" class="w-32 font-black text-blue-600 text-lg" value="${s.time || '09:00'}" onblur="trips[${currentIdx}].stops[${i}].time=this.value; saveList(${t.id}, 'stops', trips[${currentIdx}].stops, true)">
-                                    <input id="stop-${i}" class="text-xl font-black flex-1" value="${s.place || ''}" onblur="trips[${currentIdx}].stops[${i}].place=this.value; saveList(${t.id}, 'stops', trips[${currentIdx}].stops, false)">
+                                    <input type="time" class="w-32 font-black text-blue-600 text-lg" value="${s.time || '09:00'}" onblur="trips[${currentIdx}].stops[${i}].time=this.value; saveList(${t.id}, 'stops', trips[${currentIdx}].stops, true)" ${readAttr}>
+                                    <input id="stop-${i}" class="text-xl font-black flex-1" value="${s.place || ''}" onblur="trips[${currentIdx}].stops[${i}].place=this.value; saveList(${t.id}, 'stops', trips[${currentIdx}].stops, false)" ${readAttr}>
                                     <i onclick="openMap('stop-${i}')" class="fas fa-map-marked-alt map-btn"></i>
-                                    <i onclick="deleteStop(${t.id}, ${i})" class="fas fa-trash-alt text-slate-300 hover:text-red-500 cursor-pointer"></i>
+                                    ${isEditMode ? `<i onclick="deleteStop(${t.id}, ${i})" class="fas fa-trash-alt text-slate-300 hover:text-red-500 cursor-pointer"></i>` : ''}
                                 </div>
-                                <textarea rows="2" class="text-sm text-slate-400" onblur="trips[${currentIdx}].stops[${i}].note=this.value; saveList(${t.id}, 'stops', trips[${currentIdx}].stops, false)">${s.note || ''}</textarea>
+                                <textarea rows="2" class="text-sm text-slate-400" onblur="trips[${currentIdx}].stops[${i}].note=this.value; saveList(${t.id}, 'stops', trips[${currentIdx}].stops, false)" ${readAttr}>${s.note || ''}</textarea>
                             </div>
                         `).join('')}
                     </div>
@@ -178,7 +177,7 @@
                 <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
                     <div class="flex justify-between items-center mb-6 border-b pb-2">
                         <h3 class="text-sm font-black text-orange-500 italic uppercase">🛍️ Shopping 購物清單</h3>
-                        <button onclick="addShop(${t.id})" class="bg-orange-500 text-white px-4 py-1.5 rounded-full text-xs font-bold">+ 新增物品</button>
+                        ${isEditMode ? `<button onclick="addShop(${t.id})" class="bg-orange-500 text-white px-4 py-1.5 rounded-full text-xs font-bold">+ 新增物品</button>` : ''}
                     </div>
                     <div class="overflow-x-auto">
                         <table class="w-full shop-table min-w-[750px]">
@@ -190,15 +189,15 @@
                                     <tr>
                                         <td>
                                             <div class="flex items-center gap-1">
-                                                <input id="shop-loc-${i}" class="text-sm text-slate-400 border-b border-slate-50" value="${item.store || ''}" onblur="trips[${currentIdx}].shop_list[${i}].store=this.value; saveList(${t.id}, 'shop_list', trips[${currentIdx}].shop_list)">
+                                                <input id="shop-loc-${i}" class="text-sm text-slate-400 border-b border-slate-50" value="${item.store || ''}" onblur="trips[${currentIdx}].shop_list[${i}].store=this.value; saveList(${t.id}, 'shop_list', trips[${currentIdx}].shop_list)" ${readAttr}>
                                                 <i onclick="openMap('shop-loc-${i}')" class="fas fa-map-pin map-btn text-xs opacity-40"></i>
                                             </div>
                                         </td>
-                                        <td><input class="font-bold border-b border-slate-50" value="${item.item || ''}" onblur="trips[${currentIdx}].shop_list[${i}].item=this.value; saveList(${t.id}, 'shop_list', trips[${currentIdx}].shop_list)"></td>
-                                        <td><input type="number" class="text-center" value="${item.qty || 1}" onblur="trips[${currentIdx}].shop_list[${i}].qty=this.value; saveList(${t.id}, 'shop_list', trips[${currentIdx}].shop_list)"></td>
-                                        <td><input type="number" class="text-blue-600 font-bold" value="${item.price || 0}" onblur="trips[${currentIdx}].shop_list[${i}].price=this.value; saveList(${t.id}, 'shop_list', trips[${currentIdx}].shop_list)"></td>
-                                        <td><input class="text-xs text-slate-400" value="${item.note || ''}" onblur="trips[${currentIdx}].shop_list[${i}].note=this.value; saveList(${t.id}, 'shop_list', trips[${currentIdx}].shop_list)"></td>
-                                        <td><i onclick="deleteShop(${t.id}, ${i})" class="fas fa-times-circle text-slate-200 hover:text-red-500 cursor-pointer"></i></td>
+                                        <td><input class="font-bold border-b border-slate-50" value="${item.item || ''}" onblur="trips[${currentIdx}].shop_list[${i}].item=this.value; saveList(${t.id}, 'shop_list', trips[${currentIdx}].shop_list)" ${readAttr}></td>
+                                        <td><input type="number" class="text-center" value="${item.qty || 1}" onblur="trips[${currentIdx}].shop_list[${i}].qty=this.value; saveList(${t.id}, 'shop_list', trips[${currentIdx}].shop_list)" ${readAttr}></td>
+                                        <td><input type="number" class="text-blue-600 font-bold" value="${item.price || 0}" onblur="trips[${currentIdx}].shop_list[${i}].price=this.value; saveList(${t.id}, 'shop_list', trips[${currentIdx}].shop_list)" ${readAttr}></td>
+                                        <td><input class="text-xs text-slate-400" value="${item.note || ''}" onblur="trips[${currentIdx}].shop_list[${i}].note=this.value; saveList(${t.id}, 'shop_list', trips[${currentIdx}].shop_list)" ${readAttr}></td>
+                                        <td>${isEditMode ? `<i onclick="deleteShop(${t.id}, ${i})" class="fas fa-times-circle text-slate-300 hover:text-red-500 cursor-pointer"></i>` : ''}</td>
                                     </tr>
                                 `).join('')}
                             </tbody>
